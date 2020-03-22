@@ -6,317 +6,285 @@ use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
-    window::Window,
+};
+use pixels::{
+    wgpu::Surface, 
+    Error, 
+    Pixels, 
+    SurfaceTexture
 };
 extern crate scoped_threadpool;
-
-use pixels::{wgpu::Surface, Error, Pixels, SurfaceTexture};
-
+extern crate num_cpus;
 mod mandelbrot;
 
-const WIDTH: u32 = 1000;
-const HEIGHT: u32 = 1000;
-const BOX_SIZE: i16 = 128;
+#[derive(PartialEq)]
+enum ButtonState {
+    Releassed,
+    JustPressed,
+    Pressed
+}
 
-struct World {
-    box_x: i16,
-    box_y: i16,
-    velocity_x: i16,
-    velocity_y: i16,
+#[derive(Copy, Clone, Debug)]
+struct Point {
+    x: f64,
+    y: f64
+}
+
+struct Context {
+
+    up_left: Point, 
+    down_right: Point,
+
+    width: u32,
+    height: u32,
+
+    k_x : f64,
+    k_y : f64,
+
+    left_button: ButtonState,
+    coordenate_clicked: Point,
+    delta: Point,
+
+    iterations: i64,
+    threshold: i64,
+    low_res_scale: usize,
+
+    zoom_factor:f64,
 }
 
 fn main() -> Result<(), Error> {
     
     let event_loop = EventLoop::new();
-
-    let mut pressed = false;
-    let mut just_pressed = false;
-
-    let mut point_clicked = (0.0, 0.0);
-    let mut delta = (0.0, 0.0);
-
-    let mut up_left = (-2.2, 1.5);
-    let mut down_right = (0.8, -1.5);
-
-    let mut step_x = (down_right.0 - up_left.0)/(WIDTH as f64);
-    let mut step_y = (up_left.1 - down_right.1)/(WIDTH as f64);
+    let mut world = Context::new();
+    let cpus = num_cpus::get();
 
     let window = {
-        let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
+        let size = LogicalSize::new(world.width as f64, world.height as f64).to_physical::<f64>(1.0);
         WindowBuilder::new()
-            .with_title("Hello Pixels")
+            .with_title("Rusty Mandelbrot")
             .with_inner_size(size)
             .with_min_inner_size(size)
+            .with_resizable(false)
             .build(&event_loop)
             .unwrap()
     };
 
     let mut pixels = {
         let surface = Surface::create(&window);
-        let surface_texture = SurfaceTexture::new(WIDTH, HEIGHT, surface);
-        Pixels::new(WIDTH, HEIGHT, surface_texture)?
+        let surface_texture = SurfaceTexture::new(world.width, world.height, surface);
+        Pixels::new(world.width, world.height, surface_texture)?
     };
-
-    let mut world = World::new();
     
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        // println!("{:?}\n", event);
-        // if (pressed) {
-        // }
-
-        // window.request_redraw();
 
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                println!("The close button was pressed; stopping");
                 *control_flow = ControlFlow::Exit
             },
-
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
             } => {
 
-                if (pressed) {
-                    if(!just_pressed){
-                        point_clicked.0 = position.x;
-                        point_clicked.1 = position.y;
-                        just_pressed = true;
-                        // println!("point_clicked: {:?}\n", point_clicked);
-                    }
-                    delta.0 = (position.x - point_clicked.0) * step_x;
-                    delta.1 = (point_clicked.1 - position.y) * step_y;
-                    // println!("{:?}\n", delta);
-                    window.request_redraw();
+                match world.left_button {
+                    ButtonState::JustPressed => {
+                        world.coordenate_clicked.x = position.x;
+                        world.coordenate_clicked.y = position.y;
+                        world.left_button = ButtonState::Pressed;
+                    },
+                    ButtonState::Pressed => {
+                        world.delta.x = world.k_x * (position.x - world.coordenate_clicked.x);
+                        world.delta.y = world.k_y * (world.coordenate_clicked.y - position.y);
+                        window.request_redraw();
+                    },
+                    _ => ()
                 }
-                
-                // aux = position.x as u8;
-                // aux2 = position.y as u8;
-                // *control_flow = ControlFlow::Exit
             },
-
             Event::WindowEvent {
                 event: WindowEvent::MouseInput { state, button, .. },
                 ..
             } => {
-
-                if (button == winit::event::MouseButton::Left){
-
-                    if(state == winit::event::ElementState::Pressed){
-                        pressed = true;
+                if button == winit::event::MouseButton::Left {
+                    if state == winit::event::ElementState::Pressed {
+                        world.left_button = ButtonState::JustPressed;
                     }else{
-                        pressed = false;
-                        just_pressed = false;
-                        up_left = (up_left.0 - delta.0, up_left.1 - delta.1);
-                        down_right = (down_right.0 - delta.0, down_right.1 - delta.1);
+                        world.left_button = ButtonState::Releassed;
+                        world.up_left = Point { x: world.up_left.x - world.delta.x, 
+                                                y: world.up_left.y - world.delta.y };
+                        world.down_right = Point { x: world.down_right.x - world.delta.x,
+                                                   y: world.down_right.y - world.delta.y };
                         window.request_redraw();
                     }
-                    
-                    // println!("{:?}\n", state);
                 }
-
             },
-
             Event::WindowEvent {
                 event: WindowEvent::MouseWheel { delta, .. },
                 ..
             } => {
 
-                let factor = 2.0;
+                let width_excursion = (world.down_right.x - world.up_left.x) / world.zoom_factor;
+                let height_excursion = (world.up_left.y - world.down_right.y) / world.zoom_factor;
 
-                let w = (down_right.0 - up_left.0)/2.0;
-                let h = (up_left.1 - down_right.1)/2.0;
+                if delta == winit::event::MouseScrollDelta::LineDelta(0.0, 1.0) {
+                    world.up_left = Point { x: world.up_left.x + width_excursion/world.zoom_factor, 
+                                            y: world.up_left.y - height_excursion/world.zoom_factor };
+                    world.down_right = Point { x: world.down_right.x - height_excursion/world.zoom_factor, 
+                                                y: world.down_right.y + height_excursion/world.zoom_factor };
+                    
+                }else{
+                    world.up_left = Point { x: world.up_left.x - width_excursion * world.zoom_factor,
+                                            y: world.up_left.y + height_excursion * world.zoom_factor };
+                    world.down_right = Point { x: world.down_right.x + height_excursion * world.zoom_factor,
+                                               y: world.down_right.y - height_excursion * world.zoom_factor };
 
-                    if delta == winit::event::MouseScrollDelta::LineDelta(0.0, 1.0) {
-                        up_left = (up_left.0 + w/factor, up_left.1 - h/factor);
-                        down_right = (down_right.0 - h/factor, down_right.1 + h/factor);
-                        step_x = (down_right.0 - up_left.0)/(WIDTH as f64);
-                        step_y = (up_left.1 - down_right.1)/(WIDTH as f64);
-                        // println!("{:?} {:?}", up_left, down_right);
-                        println!("IN");
-                    }else{
-                        up_left = (up_left.0 - w*factor, up_left.1 + h*factor);
-                        down_right = (down_right.0 + h*factor, down_right.1 - h*factor);
-                        step_x = (down_right.0 - up_left.0)/(WIDTH as f64);
-                        step_y = (up_left.1 - down_right.1)/(WIDTH as f64);
-                        println!("OUT");
-                    }
+                }
+                world.k_x = (world.down_right.x - world.up_left.x)/ (world.width as f64);
+                world.k_y = (world.up_left.y - world.down_right.y) / (world.width as f64);
                 window.request_redraw();
-
-            },
-
-
-            // WindowEvent { window_id: WindowId(X(WindowId(102760449))), event: MouseWheel { device_id: DeviceId(X(DeviceId(2))), delta: LineDelta(0.0, -1.0), phase: Moved, modifiers: (empty) } }
-            // Event::WindowEvent {
-            //     event: WindowEvent::MouseInput { state: Released, button: Left, .. },
-            //     ..
-            // } => {
-            //     println!("Released\n");
-            //     pressed = false;
-            // },
-
-            // MouseInput { device_id: DeviceId(X(DeviceId(2))), state: Pressed, button: Left
-
-            Event::MainEventsCleared => {
-                // Application update code.
-                // world.update();
-    
-                // Queue a RedrawRequested event.
-                // window.request_redraw();
             },
             Event::RedrawRequested(_) => {
 
-                if pressed {
-                    let up_left_mod = (up_left.0 - delta.0, up_left.1 - delta.1);
-                    let down_right_mod = (down_right.0 - delta.0, down_right.1 - delta.1);
-                    world.parallel_draw_low_res(pixels.get_frame(), up_left_mod, down_right_mod, step_x, step_y);
-                }else{
-                    world.parallel_draw(pixels.get_frame(), up_left, down_right, step_x, step_y);
-                }
-                
-                pixels.render();
+                if world.left_button == ButtonState::Pressed {
 
-                // Redraw the application.
-                //
-                // It's preferrable to render in this event rather than in MainEventsCleared, since
-                // rendering in here allows the program to gracefully handle redraws requested
-                // by the OS.
+                    let snapshot_up_left = Point { x: world.up_left.x - world.delta.x, 
+                                                   y: world.up_left.y - world.delta.y };
+                    let snapshot_donw_right = Point { x: world.down_right.x - world.delta.x, 
+                                                      y: world.down_right.y - world.delta.y };
+
+                    world.parallel_draw_low_res(pixels.get_frame(), snapshot_up_left, snapshot_donw_right, cpus as u32);
+                }else{
+                    world.parallel_draw(pixels.get_frame(), cpus as u32);
+                }
+                pixels.render();
             },
             _ => ()
-            
         }
     });
-
 }
 
-
-
-impl World {
-    /// Create a new `World` instance that can draw a moving box.
+impl Context {
     fn new() -> Self {
+
+        let up_left_ = Point { x: -2.2, y: 1.5 };
+        let down_right_ = Point { x: 0.8, y: -1.5 };
+
+        let width_ = 1000;
+        let height_ = 1000;
+
         Self {
-            box_x: 24,
-            box_y: 16,
-            velocity_x: 1,
-            velocity_y: 1,
+            up_left : up_left_,
+            down_right : down_right_,
+            width: width_,
+            height: height_,
+            k_x: (down_right_.x - up_left_.x)/(width_ as f64),
+            k_y: (up_left_.y - down_right_.y)/(height_ as f64),
+            left_button: ButtonState::Releassed,
+            coordenate_clicked: Point { x: 0.0, y: 0.0 },
+            delta: Point { x: 0.0, y: 0.0 },
+            iterations: 255,
+            threshold: 4,
+            low_res_scale: 16,
+            zoom_factor: 2.0,
         }
     }
-
-    /// Update the `World` internal state; bounce the box around the screen.
-    fn update(&mut self) {
-        if self.box_x <= 0 || self.box_x + BOX_SIZE - 1 >= WIDTH as i16 {
-            self.velocity_x *= -1;
-        }
-        if self.box_y <= 0 || self.box_y + BOX_SIZE - 1 >= HEIGHT as i16 {
-            self.velocity_y *= -1;
-        }
-
-        self.box_x += self.velocity_x;
-        self.box_y += self.velocity_y;
-    }
-
-    /// Draw the `World` state to the frame buffer.
-    ///
-    /// Assumes the default texture format: [`wgpu::TextureFormat::Rgba8UnormSrgb`]
-    fn draw(&self, frame: &mut [u8], up_left: (f64,f64), down_right:(f64,f64), step_x: f64, step_y: f64) {
-
-        // println!("{:?} {:?}", up_left, down_right);
-
+    fn draw(&self, frame: &mut [u8]) {
         for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
 
-            let pixel_x = (i % WIDTH as usize) as i16;
-            let pixel_y = (i / WIDTH as usize) as i16;
+            let pixel_x = (i % self.width as usize) as f64;
+            let pixel_y = (i / self.width as usize) as f64;
 
-            let x = up_left.0 + (pixel_x as f64 * step_x);
-            let y = up_left.1 - (pixel_y as f64 * step_y);
+            let x = self.up_left.x + (pixel_x * self.k_x);
+            let y = self.up_left.y - (pixel_y * self.k_y);
 
-            let aux = mandelbrot::ComplexNumber { real : x, img : y};
-
-            let degree:u8 = mandelbrot::mandebrot_set_degree(aux, 255, 4) as u8;
-
-            let color = [0xff - degree, 0xff - degree, 0xff - degree, 0xff];
+            let number = mandelbrot::ComplexNumber { real : x, img : y};
+            let degree:u8 = mandelbrot::mandebrot_set_degree(number, self.iterations, self.threshold) as u8;
+            let channel = 0xff - degree;
+            let color = [channel, channel, channel, 0xff];
 
             pixel.copy_from_slice(&color);
         }
     }
-
-    fn parallel_draw(&self, frame: &mut [u8], up_left: (f64,f64), down_right:(f64,f64), step_x: f64, step_y: f64){
-
-        let mut pool = scoped_threadpool::Pool::new(8);
-
-        let w = (down_right.0 - up_left.0)/8.0;
-        let h = (up_left.1 - down_right.1)/8.0;
-
-        let total_pixel = WIDTH * HEIGHT * 4;
-
-        pool.scoped(|scope| {
-            for (i, slice) in frame.chunks_mut((total_pixel/8) as usize).enumerate() {
-
-                let my_up_left = (up_left.0, up_left.1 - (i as f64) * h );
-
-                let my_down_right = (down_right.0, (up_left.1 - h) - ((i as f64) * h) );
-
-                scope.execute(move || self.draw(slice, my_up_left, my_down_right, step_x, step_y));
-            }
-        });
-    }
-
-    fn parallel_draw_low_res(&self, frame: &mut [u8], up_left: (f64,f64), down_right:(f64,f64), step_x: f64, step_y: f64){
-
-        let mut pool = scoped_threadpool::Pool::new(8);
-
-        let w = (down_right.0 - up_left.0)/8.0;
-        let h = (up_left.1 - down_right.1)/8.0;
-
-        let total_pixel = WIDTH * HEIGHT * 4;
-
-        pool.scoped(|scope| {
-            for (i, slice) in frame.chunks_mut((total_pixel/8) as usize).enumerate() {
-
-                let my_up_left = (up_left.0, up_left.1 - (i as f64) * h );
-
-                let my_down_right = (down_right.0, (up_left.1 - h) - ((i as f64) * h) );
-
-                scope.execute(move || self.draw_low_res(slice, my_up_left, my_down_right, step_x, step_y));
-            }
-        });
-    }
-
-    fn draw_low_res(&self, frame: &mut [u8], up_left: (f64,f64), down_right:(f64,f64), step_x: f64, step_y: f64) {
-
-        let mut stored_degree:u8 = 0;
-        
+    fn draw_slice(&self, frame: &mut [u8], up_left: Point) {
         for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
 
-            if i % 8 == 0 {
+            let pixel_x = (i % self.width as usize) as f64;
+            let pixel_y = (i / self.width as usize) as f64;
 
-                let pixel_x = (i % WIDTH as usize) as i16;
-                let pixel_y = (i / WIDTH as usize) as i16;
-    
-                let x = up_left.0 + (pixel_x as f64 * step_x);
-                let y = up_left.1 - (pixel_y as f64 * step_y);
-    
-                let aux = mandelbrot::ComplexNumber { real : x, img : y};
-    
-                let degree:u8 = mandelbrot::mandebrot_set_degree(aux, 255, 4) as u8;
-    
-                let color = [0xff - degree, 0xff - degree, 0xff - degree, 0xff];
+            let x = up_left.x + (pixel_x * self.k_x);
+            let y = up_left.y - (pixel_y * self.k_y);
+
+            let number = mandelbrot::ComplexNumber { real : x, img : y};
+            let degree:u8 = mandelbrot::mandebrot_set_degree(number, self.iterations, self.threshold) as u8;
+            let channel = 0xff - degree;
+            let color = [channel, channel, channel, 0xff];
+
+            pixel.copy_from_slice(&color);
+        }
+    }
+    fn draw_low_res(&self, frame: &mut [u8], up_left: Point) {
+
+        let mut stored_degree:u8 = 0;
+
+        for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
+
+            if i % self.low_res_scale == 0 {
+
+                let pixel_x = (i % self.width as usize) as f64;
+                let pixel_y = (i / self.width as usize) as f64;
+
+                let x = up_left.x + (pixel_x * self.k_x);
+                let y = up_left.y - (pixel_y * self.k_y);
+
+                let number = mandelbrot::ComplexNumber { real : x, img : y};
+                let degree:u8 = mandelbrot::mandebrot_set_degree(number, self.iterations, self.threshold) as u8;
                 stored_degree = degree;
-                
-                pixel.copy_from_slice(&color);
+                let channel = 0xff - degree;
+                let color = [channel, channel, channel, 0xff];
 
+                pixel.copy_from_slice(&color);
             }else{
-                let color = [0xff - stored_degree, 0xff - stored_degree, 0xff - stored_degree, 0xff];
+                let channel = 0xff - stored_degree;
+                let color = [channel, channel, channel, 0xff];
                 pixel.copy_from_slice(&color);
             }
-
-            
-
-
         }
+    }
+    fn parallel_draw(&self, frame: &mut [u8], thread_num:u32){
+
+        let mut pool = scoped_threadpool::Pool::new(thread_num);
+        let height_slice = (self.up_left.y - self.down_right.y) / thread_num as f64;
+        let total_pixel = self.width * self.height * 4;
+        let slice_size = (total_pixel/thread_num) as usize;
+
+        pool.scoped(|scope| {
+            for (i, slice) in frame.chunks_mut(slice_size).enumerate() {
+
+                let local_up_left = Point { x: self.up_left.x, 
+                                            y: self.up_left.y - (i as f64) * height_slice };
+
+                scope.execute(move || self.draw_slice(slice, local_up_left));
+            }
+        });
+    }
+    fn parallel_draw_low_res(&self, frame: &mut [u8], up_left: Point, down_right: Point, thread_num: u32){
+
+        let mut pool = scoped_threadpool::Pool::new(thread_num);
+        let height_slice = (up_left.y - down_right.y) / thread_num as f64;
+        let total_pixel = self.width * self.height * 4;
+        let slice_size = (total_pixel/thread_num) as usize;
+
+        pool.scoped(|scope| {
+            for (i, slice) in frame.chunks_mut(slice_size).enumerate() {
+
+                let local_up_left = Point { x: up_left.x, 
+                                            y: up_left.y - (i as f64) * height_slice };
+
+                scope.execute(move || self.draw_low_res(slice, local_up_left));
+            }
+        });
     }
 }
