@@ -13,6 +13,7 @@ use pixels::{
     Pixels, 
     SurfaceTexture
 };
+use std::time::{Duration, Instant};
 extern crate scoped_threadpool;
 extern crate num_cpus;
 mod mandelbrot;
@@ -57,6 +58,7 @@ fn main() -> Result<(), Error> {
     let event_loop = EventLoop::new();
     let mut world = Context::new();
     let cpus = num_cpus::get();
+    let mut deepness:f64 = 0.0;
 
     let window = {
         let size = LogicalSize::new(world.width as f64, world.height as f64).to_physical::<f64>(1.0);
@@ -130,12 +132,14 @@ fn main() -> Result<(), Error> {
                 let height_excursion = (world.up_left.y - world.down_right.y) / world.zoom_factor;
 
                 if delta == winit::event::MouseScrollDelta::LineDelta(0.0, 1.0) {
+                    deepness = width_excursion/world.zoom_factor;
                     world.up_left = Point { x: world.up_left.x + width_excursion/world.zoom_factor, 
                                             y: world.up_left.y - height_excursion/world.zoom_factor };
                     world.down_right = Point { x: world.down_right.x - height_excursion/world.zoom_factor, 
                                                 y: world.down_right.y + height_excursion/world.zoom_factor };
                     
                 }else{
+                    deepness = width_excursion * world.zoom_factor;
                     world.up_left = Point { x: world.up_left.x - width_excursion * world.zoom_factor,
                                             y: world.up_left.y + height_excursion * world.zoom_factor };
                     world.down_right = Point { x: world.down_right.x + height_excursion * world.zoom_factor,
@@ -144,10 +148,11 @@ fn main() -> Result<(), Error> {
                 }
                 world.k_x = (world.down_right.x - world.up_left.x)/ (world.width as f64);
                 world.k_y = (world.up_left.y - world.down_right.y) / (world.width as f64);
+                println!("Deepness: {}", deepness);
                 window.request_redraw();
             },
             Event::RedrawRequested(_) => {
-
+                let start = Instant::now();
                 if world.left_button == ButtonState::Pressed {
 
                     let snapshot_up_left = Point { x: world.up_left.x - world.delta.x, 
@@ -159,7 +164,9 @@ fn main() -> Result<(), Error> {
                 }else{
                     world.parallel_draw(pixels.get_frame(), cpus as u32);
                 }
+                let duration = start.elapsed();
                 pixels.render();
+                println!("Frame time: {:?}", duration);
             },
             _ => ()
         }
