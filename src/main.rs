@@ -184,8 +184,8 @@ impl Context {
         let up_left_ = Point { x: -2.2, y: 1.5 };
         let down_right_ = Point { x: 0.8, y: -1.5 };
 
-        let width_ = 400;
-        let height_ = 400;
+        let width_ = 1000;
+        let height_ = 1000;
 
         Self {
             up_left: up_left_,
