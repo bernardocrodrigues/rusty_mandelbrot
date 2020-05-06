@@ -52,6 +52,9 @@ fn main() -> Result<(), Error> {
     let mut world = Context::new();
     let cpus = num_cpus::get();
     let mut deepness: f64 = 0.0;
+    if (world.height % cpus as u32) != 0 {
+        println!("WARNING: HardCoded resolution height({}) should be divisable by the number of threads:{}",world.height,cpus)
+    }
 
     let window = {
         let size =
@@ -185,7 +188,7 @@ impl Context {
         let down_right_ = Point { x: 0.8, y: -1.5 };
 
         let width_ = 1000;
-        let height_ = 1000;
+        let height_ = 960;
 
         Self {
             up_left: up_left_,
@@ -213,7 +216,7 @@ impl Context {
 
             let number = mandelbrot::ComplexNumber { real: x, img: y };
             let degree: u8 =
-                mandelbrot::mandebrot_set_degree(number, self.iterations, self.threshold) as u8;
+                mandelbrot::mandelbrot_set_degree(number, self.iterations, self.threshold) as u8;
             let channel = 0xff - degree;
             let color = [channel, channel, channel, 0xff];
 
@@ -230,7 +233,7 @@ impl Context {
 
             let number = mandelbrot::ComplexNumber { real: x, img: y };
             let degree: u8 =
-                mandelbrot::mandebrot_set_degree(number, self.iterations, self.threshold) as u8;
+                mandelbrot::mandelbrot_set_degree(number, self.iterations, self.threshold) as u8;
             let channel = 0xff - degree;
             let color = [channel, channel, channel, 0xff];
 
@@ -250,7 +253,8 @@ impl Context {
 
                 let number = mandelbrot::ComplexNumber { real: x, img: y };
                 let degree: u8 =
-                    mandelbrot::mandebrot_set_degree(number, self.iterations, self.threshold) as u8;
+                    mandelbrot::mandelbrot_set_degree(number, self.iterations, self.threshold)
+                        as u8;
                 stored_degree = degree;
                 let channel = 0xff - degree;
                 let color = [channel, channel, channel, 0xff];
