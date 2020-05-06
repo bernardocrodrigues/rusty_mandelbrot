@@ -52,7 +52,7 @@ fn main() -> Result<(), Error> {
     let mut world = Context::new();
     let cpus = num_cpus::get();
     let mut deepness: f64 = 0.0;
-    if (world.height % cpus as u32) != 0{
+    if (world.height % cpus as u32) != 0 {
         println!("WARNING: HardCoded resolution height({}) should be divisable by the number of threads:{}",world.height,cpus)
     }
 
@@ -253,7 +253,8 @@ impl Context {
 
                 let number = mandelbrot::ComplexNumber { real: x, img: y };
                 let degree: u8 =
-                    mandelbrot::mandelbrot_set_degree(number, self.iterations, self.threshold) as u8;
+                    mandelbrot::mandelbrot_set_degree(number, self.iterations, self.threshold)
+                        as u8;
                 stored_degree = degree;
                 let channel = 0xff - degree;
                 let color = [channel, channel, channel, 0xff];
