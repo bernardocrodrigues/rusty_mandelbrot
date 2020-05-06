@@ -50,7 +50,7 @@ impl ComplexNumber {
     }
 }
 
-pub fn mandebrot_set_degree(candidate: ComplexNumber, max_steps: i64, threshold: i64) -> i64 {
+pub fn mandelbrot_set_degree(candidate: ComplexNumber, max_steps: i64, threshold: i64) -> i64 {
     let c = candidate;
     let mut z = ComplexNumber { real: 0.0, img: 0.0 };
     let mut index: i64 = 0;
